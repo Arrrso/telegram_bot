@@ -1,7 +1,3 @@
-"""
-bot.py (для Render, 24/7)
-"""
-
 import os
 import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -20,13 +16,19 @@ vokzals = {
     "Ярославский":  ["Сергиев Посад", "Пушкино", "Монино", "Александров", "Фрязино", "Болшево", "Мытищи"]
 }
 
-# --- Функция выбора номера станции ---
-def get_weighted_number() -> int:
+# --- Функция для выбора станции с весами ---
+def weighted_station_number() -> int:
     numbers = list(range(10, 31))
-    weights = [3 if 11 <= n <= 22 else 1 for n in numbers]  # внутри 11–22 чаще
+    weights = []
+    for n in numbers:
+        if 14 <= n <= 24:   # чаще всего
+            weights.append(5)
+        elif 10 <= n <= 13: # редко
+            weights.append(1)
+        else:               # 25–30 — средне
+            weights.append(3)
     return random.choices(numbers, weights=weights, k=1)[0]
 
-# --- Вспомогательные функции ---
 def generate_trip(chosen_vokzal: str | None = None) -> str:
     if chosen_vokzal and chosen_vokzal in vokzals:
         vokzal = chosen_vokzal
@@ -34,7 +36,7 @@ def generate_trip(chosen_vokzal: str | None = None) -> str:
         vokzal = random.choice(list(vokzals.keys()))
 
     direction = random.choice(vokzals[vokzal])
-    station_number = get_weighted_number()
+    station_number = weighted_station_number()
 
     text = (
         f"Ваш вокзал: <b>{vokzal}</b>\n"
@@ -44,23 +46,24 @@ def generate_trip(chosen_vokzal: str | None = None) -> str:
     )
     return text
 
-# --- Хендлеры ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
+# --- Главное меню ---
+def main_menu_keyboard():
+    return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎲 Рандомное приключение", callback_data="random")],
         [InlineKeyboardButton("📍 Выбрать вокзал", callback_data="choose")],
         [InlineKeyboardButton("📌 Список вокзалов", callback_data="list")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    ])
 
+# --- Хендлеры ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_html(
         "👋 Привет!\nЯ помогу тебе выбрать вокзал, направление и случайную станцию для выхода.\nНажми кнопку — и узнаешь, откуда и куда поедешь 🚆✨",
-        reply_markup=reply_markup
+        reply_markup=main_menu_keyboard()
     )
 
 async def trip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = generate_trip()
-    await update.message.reply_html(text)
+    await update.message.reply_html(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]))
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -69,10 +72,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "random":
         text = generate_trip()
-        await query.edit_message_text(text, parse_mode="HTML")
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]))
+
     elif data == "list":
         vokzal_list = "\n".join(f"• {v}" for v in vokzals.keys())
-        await query.edit_message_text(f"<b>Список вокзалов:</b>\n{vokzal_list}", parse_mode="HTML")
+        await query.edit_message_text(
+            f"<b>Список вокзалов:</b>\n{vokzal_list}",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back")]])
+        )
+
     elif data == "choose":
         keyboard = []
         row = []
@@ -85,18 +94,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append(row)
         keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
         await query.edit_message_text("Выберите вокзал:", reply_markup=InlineKeyboardMarkup(keyboard))
+
     elif data.startswith("vokzal:"):
         vokzal_name = data.split(":", 1)[1]
         text = generate_trip(chosen_vokzal=vokzal_name)
-        await query.edit_message_text(text, parse_mode="HTML")
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]))
+
     elif data == "back":
         await query.edit_message_text(
             "Главное меню:\nНажмите кнопку, чтобы сгенерировать маршрут или выбрать вокзал.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🎲 Рандомное приключение", callback_data="random")],
-                [InlineKeyboardButton("📍 Выбрать вокзал", callback_data="choose")],
-                [InlineKeyboardButton("📌 Список вокзалов", callback_data="list")],
-            ])
+            reply_markup=main_menu_keyboard()
         )
 
 # --- Запуск приложения ---
