@@ -20,7 +20,11 @@ vokzals = {
     "Ярославский":  ["Сергиев Посад", "Пушкино", "Монино", "Александров", "Фрязино", "Болшево", "Мытищи"]
 }
 
-numbers = list(range(10, 31))
+# --- Функция выбора номера станции ---
+def get_weighted_number() -> int:
+    numbers = list(range(10, 31))
+    weights = [3 if 11 <= n <= 22 else 1 for n in numbers]  # внутри 11–22 чаще
+    return random.choices(numbers, weights=weights, k=1)[0]
 
 # --- Вспомогательные функции ---
 def generate_trip(chosen_vokzal: str | None = None) -> str:
@@ -30,7 +34,7 @@ def generate_trip(chosen_vokzal: str | None = None) -> str:
         vokzal = random.choice(list(vokzals.keys()))
 
     direction = random.choice(vokzals[vokzal])
-    station_number = random.choice(numbers)
+    station_number = get_weighted_number()
 
     text = (
         f"Ваш вокзал: <b>{vokzal}</b>\n"
@@ -96,7 +100,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 # --- Запуск приложения ---
-
 def main():
     token = os.environ.get("BOT_TOKEN")
     if not token:
