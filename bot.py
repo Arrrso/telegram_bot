@@ -1,80 +1,65 @@
 import os
-import random
-import logging
 from fastapi import FastAPI, Request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
+from telegram.ext import ContextTypes
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from contextlib import asynccontextmanager
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+# === Конфигурация ===
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # Токен берём из переменных окружения
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")   # Например: https://your-app.onrender.com/webhook/<TOKEN>
 
-logging.basicConfig(level=logging.INFO)
+if not TOKEN:
+    raise ValueError("Не найден TELEGRAM_BOT_TOKEN в переменных окружения!")
 
-# --- Создаём FastAPI ---
-app = FastAPI()
-
-# --- Создаём бота ---
 application = Application.builder().token(TOKEN).build()
 
-# --- Хэндлеры ---
-async def start(update: Update, context):
-    keyboard = [
-        [InlineKeyboardButton("Сгенерировать число", callback_data="random")]
-    ]
-    await update.message.reply_text(
-        "Привет! Я бот, который генерирует случайное число 🚂",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
+# === Хендлеры ===
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[InlineKeyboardButton("Назад", callback_data="back")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Привет! Я бот 🚀", reply_markup=reply_markup)
 
-async def button(update: Update, context):
+async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[InlineKeyboardButton("Назад", callback_data="back")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(f"Ты сказал: {update.message.text}", reply_markup=reply_markup)
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    if query.data == "random":
-        number = weighted_random_number()
+    if query.data == "back":
         keyboard = [[InlineKeyboardButton("Назад", callback_data="back")]]
-        await query.edit_message_text(
-            text=f"🎲 Ваше число: {number}",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
-    elif query.data == "back":
-        keyboard = [
-            [InlineKeyboardButton("Сгенерировать число", callback_data="random")]
-        ]
-        await query.edit_message_text(
-            text="Привет! Я бот, который генерирует случайное число 🚂",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("Возврат в начало 🔙", reply_markup=reply_markup)
 
-def weighted_random_number():
-    # 14–24 чаще, 10–14 редко, 24–30 средне
-    weights = []
-    for i in range(10, 31):
-        if 14 <= i <= 24:
-            weights.append(6)
-        elif 10 <= i < 14:
-            weights.append(1)
-        else:  # 25–30
-            weights.append(3)
-    return random.choices(range(10, 31), weights=weights, k=1)[0]
-
-# --- Добавляем хэндлеры ---
+# === Роутинг бота ===
 application.add_handler(CommandHandler("start", start))
-application.add_handler(CallbackQueryHandler(button))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+application.add_handler(CallbackQueryHandler(button_handler))
 
-# --- Роуты для Render ---
-@app.on_event("startup")
-async def on_startup():
-    await application.initialize()
-    await application.start()
-    # Устанавливаем webhook
-    url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/webhook/{TOKEN}"
-    await application.bot.set_webhook(url)
+# === FastAPI + Lifespan ===
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # При старте
+    await application.bot.set_webhook(WEBHOOK_URL)
+    print("✅ Webhook установлен:", WEBHOOK_URL)
+    yield
+    # При завершении
+    await application.bot.delete_webhook()
+    print("🛑 Webhook удалён")
 
+app = FastAPI(lifespan=lifespan)
+
+# === Endpoint для Telegram ===
 @app.post("/webhook/{token}")
-async def webhook(token: str, request: Request):
+async def webhook(request: Request, token: str):
     if token != TOKEN:
-        return {"error": "invalid token"}
+        return {"status": "forbidden"}  # Проверка безопасности
+
     data = await request.json()
     update = Update.de_json(data, application.bot)
     await application.process_update(update)
-    return {"ok": True}
+    return {"status": "ok"}
