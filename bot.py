@@ -2,7 +2,7 @@ import os
 import random
 import logging
 from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
 # Настройка логирования
 logging.basicConfig(
@@ -31,14 +31,14 @@ main_keyboard = ReplyKeyboardMarkup([['🚂 Сгенерировать марш�
 back_keyboard = ReplyKeyboardMarkup([['🔙 Назад']], resize_keyboard=True)
 
 # Обработчики команд
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+def start(update: Update, context: CallbackContext):
+    update.message.reply_text(
         "🚉 Добро пожаловать в бот для генерации маршрутов!\n\n"
         "Нажмите '🚂 Сгенерировать маршрут' для получения случайного маршрута.",
         reply_markup=main_keyboard
     )
 
-async def generate_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def generate_route(update: Update, context: CallbackContext):
     station = random.choice(list(RAILWAY_STATIONS.keys()))
     direction = random.choice(RAILWAY_STATIONS[station])
     station_number = random.randint(10, 30)
@@ -50,35 +50,39 @@ async def generate_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Приятного путешествия! 🌟"
     )
     
-    await update.message.reply_text(response, parse_mode='HTML', reply_markup=back_keyboard)
+    update.message.reply_text(response, parse_mode='HTML', reply_markup=back_keyboard)
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_message(update: Update, context: CallbackContext):
     text = update.message.text
     
     if text == '🚂 Сгенерировать маршрут':
-        await generate_route(update, context)
+        generate_route(update, context)
     elif text == '🔙 Назад':
-        await update.message.reply_text(
+        update.message.reply_text(
             "Главное меню:",
             reply_markup=main_keyboard
         )
     else:
-        await update.message.reply_text(
+        update.message.reply_text(
             "Используйте кнопки для навигации",
             reply_markup=main_keyboard
         )
 
 # Основная функция
 def main():
-    # Создаем приложение
-    application = Application.builder().token(TOKEN).build()
+    # Создаем Updater и передаем ему токен
+    updater = Updater(TOKEN, use_context=True)
+    
+    # Получаем диспетчер для регистрации обработчиков
+    dp = updater.dispatcher
     
     # Добавляем обработчики
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
     
     # Запускаем бота
-    application.run_polling()
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
     main()
