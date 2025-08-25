@@ -1,4 +1,1 @@
-python-telegram-bot[fastapi]==20.3
-fastapi
-uvicorn
-requests
+python-telegram-bot==20.7

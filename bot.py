@@ -1,15 +1,24 @@
-
 import os
 import random
-from fastapi import FastAPI, Request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+import logging
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-vokzals = {
+# Настройка логирования
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
+# Данные бота
+TOKEN = os.environ.get('TOKEN')  # Токен берется из переменных окружения
+
+# Списки данных
+RAILWAY_STATIONS = {
     "Белорусский": ["Одинцово", "Кубинка", "Звенигород", "Трехгорка", "Голицыно", "Тучково", "Можайск", "Сетунь"],
     "Казанский": ["Голутвин", "Люберцы", "Раменское", "Шатура"],
     "Киевский": ["Переделкино", "Очаково", "Нара", "Балабаново", "Обнинск", "Лесной городок", "Малоярославец"],
-    "Курский": ["Переделкино", "Очаково", "Нара", "Балабаново", "Обнинск", "Лесной городок", "Малоярославец"],
+    "Курский": ["Подольск", "Щербинка", "Чехов", "Серпухов", "Тула"],
     "Ленинградский": ["Крюково", "Химки", "Клин", "Сходня", "Подсолнечная", "Ховрино"],
     "Павелецкий": ["Ступино", "Бирюлево", "Расторгуево", "Кашира", "Узуново", "Барыбино"],
     "Рижский": ["Волоколамск", "Нахабино", "Истра", "Новоиерусалимская", "Румянцево"],
@@ -17,77 +26,59 @@ vokzals = {
     "Ярославский": ["Сергиев Посад", "Пушкино", "Монино", "Александров", "Фрязино", "Болшево", "Мытищи"]
 }
 
-numbers = [10]*5 + [11]*10 + [12]*10 + [13]*10 + [14]*10 + [15]*10 + [16]*10 + [17]*10 + [18]*10 + [19]*10 + [20]*10 + [21]*10 + [22]*10 + [23]*5 + [24]*5 + [25]*7 + [26]*7 + [27]*7 + [28]*7 + [29]*7 + [30]*7
+# Клавиатуры
+main_keyboard = ReplyKeyboardMarkup([['🚂 Сгенерировать маршрут']], resize_keyboard=True)
+back_keyboard = ReplyKeyboardMarkup([['🔙 Назад']], resize_keyboard=True)
 
-def generate_trip(chosen_vokzal: str | None = None) -> str:
-    vokzal = chosen_vokzal if chosen_vokzal in vokzals else random.choice(list(vokzals.keys()))
-    direction = random.choice(vokzals[vokzal])
-    station_number = random.choice(numbers)
-    return f"Ваш вокзал: <b>{vokzal}</b>\nНаправление: Москва — <b>{direction}</b>\nСтанция для выхода: <b>{station_number}</b>\n\nПриятного путешествия! 🚆"
-
-fastapi_app = FastAPI()
-TOKEN = os.environ.get("BOT_TOKEN")
-bot = Bot(TOKEN)
-application = Application.builder().token(TOKEN).build()
-
+# Обработчики команд
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("🎲 Рандомное приключение", callback_data="random")],
-        [InlineKeyboardButton("📍 Выбрать вокзал", callback_data="choose")],
-        [InlineKeyboardButton("📌 Список вокзалов", callback_data="list")],
-    ]
-    await update.message.reply_html(
-        "👋 Привет! Я помогу тебе выбрать вокзал, направление и случайную станцию для выхода.",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "🚉 Добро пожаловать в бот для генерации маршрутов!\n\n"
+        "Нажмите '🚂 Сгенерировать маршрут' для получения случайного маршрута.",
+        reply_markup=main_keyboard
     )
 
-def back_button():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back")]])
+async def generate_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    station = random.choice(list(RAILWAY_STATIONS.keys()))
+    direction = random.choice(RAILWAY_STATIONS[station])
+    station_number = random.randint(10, 30)
+    
+    response = (
+        f"🚂 <b>Ваш вокзал:</b> {station}\n"
+        f"📍 <b>Направление:</b> Москва — {direction}\n"
+        f"🔢 <b>Станция для выхода:</b> {station_number}\n\n"
+        f"Приятного путешествия! 🌟"
+    )
+    
+    await update.message.reply_text(response, parse_mode='HTML', reply_markup=back_keyboard)
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-    if data == "random":
-        text = generate_trip()
-        await query.edit_message_text(text, parse_mode="HTML", reply_markup=back_button())
-    elif data == "list":
-        vokzal_list = "\n".join(f"• {v}" for v in vokzals.keys())
-        await query.edit_message_text(f"<b>Список вокзалов:</b>\n{vokzal_list}", parse_mode="HTML", reply_markup=back_button())
-    elif data == "choose":
-        keyboard = []
-        row = []
-        for i, v in enumerate(vokzals.keys(), start=1):
-            row.append(InlineKeyboardButton(v, callback_data=f"vokzal:{v}"))
-            if i % 3 == 0:
-                keyboard.append(row)
-                row = []
-        if row:
-            keyboard.append(row)
-        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
-        await query.edit_message_text("Выберите вокзал:", reply_markup=InlineKeyboardMarkup(keyboard))
-    elif data.startswith("vokzal:"):
-        vokzal_name = data.split(":", 1)[1]
-        text = generate_trip(chosen_vokzal=vokzal_name)
-        await query.edit_message_text(text, parse_mode="HTML", reply_markup=back_button())
-    elif data == "back":
-        await query.edit_message_text(
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    
+    if text == '🚂 Сгенерировать маршрут':
+        await generate_route(update, context)
+    elif text == '🔙 Назад':
+        await update.message.reply_text(
             "Главное меню:",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🎲 Рандомное приключение", callback_data="random")],
-                [InlineKeyboardButton("📍 Выбрать вокзал", callback_data="choose")],
-                [InlineKeyboardButton("📌 Список вокзалов", callback_data="list")],
-            ])
+            reply_markup=main_keyboard
+        )
+    else:
+        await update.message.reply_text(
+            "Используйте кнопки для навигации",
+            reply_markup=main_keyboard
         )
 
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CallbackQueryHandler(button_handler))
+# Основная функция
+def main():
+    # Создаем приложение
+    application = Application.builder().token(TOKEN).build()
+    
+    # Добавляем обработчики
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    # Запускаем бота
+    application.run_polling()
 
-@fastapi_app.post("/webhook/{token}")
-async def webhook(token: str, request: Request):
-    if token != TOKEN:
-        return {"status": "unauthorized"}
-    data = await request.json()
-    update = Update.de_json(data, bot)
-    await application.process_update(update)
-    return {"ok": True}
+if __name__ == "__main__":
+    main()
