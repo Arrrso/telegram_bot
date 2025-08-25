@@ -1,5 +1,6 @@
 import os
 import random
+from fastapi import FastAPI, Request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
@@ -16,19 +17,20 @@ vokzals = {
     "Ярославский":  ["Сергиев Посад", "Пушкино", "Монино", "Александров", "Фрязино", "Болшево", "Мытищи"]
 }
 
-# --- Функция для выбора станции с весами ---
-def weighted_station_number() -> int:
-    numbers = list(range(10, 31))
+# --- Вероятности ---
+def get_random_station_number():
     weights = []
+    numbers = list(range(10, 31))
     for n in numbers:
-        if 14 <= n <= 24:   # чаще всего
-            weights.append(5)
-        elif 10 <= n <= 13: # редко
-            weights.append(1)
-        else:               # 25–30 — средне
-            weights.append(3)
+        if 14 <= n <= 24:
+            weights.append(5)  # чаще
+        elif 10 <= n < 14:
+            weights.append(1)  # редко
+        else:
+            weights.append(3)  # средне
     return random.choices(numbers, weights=weights, k=1)[0]
 
+# --- Генератор маршрута ---
 def generate_trip(chosen_vokzal: str | None = None) -> str:
     if chosen_vokzal and chosen_vokzal in vokzals:
         vokzal = chosen_vokzal
@@ -36,7 +38,7 @@ def generate_trip(chosen_vokzal: str | None = None) -> str:
         vokzal = random.choice(list(vokzals.keys()))
 
     direction = random.choice(vokzals[vokzal])
-    station_number = weighted_station_number()
+    station_number = get_random_station_number()
 
     text = (
         f"Ваш вокзал: <b>{vokzal}</b>\n"
@@ -46,24 +48,23 @@ def generate_trip(chosen_vokzal: str | None = None) -> str:
     )
     return text
 
-# --- Главное меню ---
-def main_menu_keyboard():
-    return InlineKeyboardMarkup([
+# --- Хендлеры ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
         [InlineKeyboardButton("🎲 Рандомное приключение", callback_data="random")],
         [InlineKeyboardButton("📍 Выбрать вокзал", callback_data="choose")],
         [InlineKeyboardButton("📌 Список вокзалов", callback_data="list")],
-    ])
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
-# --- Хендлеры ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_html(
         "👋 Привет!\nЯ помогу тебе выбрать вокзал, направление и случайную станцию для выхода.\nНажми кнопку — и узнаешь, откуда и куда поедешь 🚆✨",
-        reply_markup=main_menu_keyboard()
+        reply_markup=reply_markup
     )
 
 async def trip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = generate_trip()
-    await update.message.reply_html(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]))
+    await update.message.reply_html(text)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -72,16 +73,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "random":
         text = generate_trip()
-        await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]))
-
+        await query.edit_message_text(text, parse_mode="HTML")
     elif data == "list":
         vokzal_list = "\n".join(f"• {v}" for v in vokzals.keys())
-        await query.edit_message_text(
-            f"<b>Список вокзалов:</b>\n{vokzal_list}",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back")]])
-        )
-
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
+        await query.edit_message_text(f"<b>Список вокзалов:</b>\n{vokzal_list}", parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
     elif data == "choose":
         keyboard = []
         row = []
@@ -94,32 +90,60 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append(row)
         keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
         await query.edit_message_text("Выберите вокзал:", reply_markup=InlineKeyboardMarkup(keyboard))
-
     elif data.startswith("vokzal:"):
         vokzal_name = data.split(":", 1)[1]
         text = generate_trip(chosen_vokzal=vokzal_name)
-        await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]))
-
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
     elif data == "back":
+        keyboard = [
+            [InlineKeyboardButton("🎲 Рандомное приключение", callback_data="random")],
+            [InlineKeyboardButton("📍 Выбрать вокзал", callback_data="choose")],
+            [InlineKeyboardButton("📌 Список вокзалов", callback_data="list")],
+        ]
         await query.edit_message_text(
             "Главное меню:\nНажмите кнопку, чтобы сгенерировать маршрут или выбрать вокзал.",
-            reply_markup=main_menu_keyboard()
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
-# --- Запуск приложения ---
-def main():
-    token = os.environ.get("BOT_TOKEN")
-    if not token:
-        print("Ошибка: не найден BOT_TOKEN. Установите переменную окружения на Render.")
-        return
+# --- FastAPI + Webhook ---
+TOKEN = os.environ.get("BOT_TOKEN")
+WEBHOOK_PATH = f"/webhook/{TOKEN}"
+PORT = int(os.environ.get("PORT", 8080))
 
-    app = Application.builder().token(token).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("trip", trip_command))
-    app.add_handler(CallbackQueryHandler(button_handler))
+app = FastAPI()
+application = Application.builder().token(TOKEN).build()
 
-    print("Бот запущен через polling...")
-    app.run_polling()
+# Регистрируем хендлеры
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("trip", trip_command))
+application.add_handler(CallbackQueryHandler(button_handler))
+
+@app.post(WEBHOOK_PATH)
+async def webhook(request: Request):
+    data = await request.json()
+    update = Update.de_json(data, application.bot)
+    await application.process_update(update)
+    return {"ok": True}
+
+@app.get("/")
+async def home():
+    return {"status": "running"}
 
 if __name__ == "__main__":
-    main()
+    import uvicorn
+    import asyncio
+
+    async def run():
+        # Устанавливаем webhook при старте
+        url = os.environ.get("RENDER_EXTERNAL_URL")  # Render задаёт его автоматически
+        if url:
+            webhook_url = f"{url}{WEBHOOK_PATH}"
+            await application.bot.set_webhook(webhook_url)
+            print(f"Webhook установлен: {webhook_url}")
+
+        config = uvicorn.Config(app, host="0.0.0.0", port=PORT)
+        server = uvicorn.Server(config)
+        await server.serve()
+
+    asyncio.run(run())
